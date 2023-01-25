@@ -1,0 +1,235 @@
+---
+title: "Survie_Projet"
+author: "Chikhaoui Sarah"
+date: "2022-11-03"
+output: html_document
+---
+Exercice 1: (Implémentation de l’estimateur de Kaplan Meyer).
+
+1. Ecrire un fonction prenant en argument un vecteur de dates (non ordonnées), un vecteur de status
+(0 ou 1) et qui renvoie l’estimateur de Kaplan Meyer de la courbe de survie, représenté par une
+liste de deux vecteurs :
+(a) le vecteur xx (abscisses) des dates d’observations ordonnées
+(b) le vecteur yy(ordonnées) des estimateurs de Kaplan Meyer de la survie aux dates xx, i.e.
+yy[i] = $\hat S_{\text{KM}}$( xx[i]).
+
+```{r}
+EstimSurvie_km=function(dates=vector(mode="numeric", length = n), status=vector(mode="numeric", length = length(dates)), choise.plot="TRUE/FALSE"){
+  library(tidyverse)
+  cbind.data.frame(dates,status) %>% arrange(dates)-> df0
+  df0 %>% group_by(dates) %>% summarise(d= sum(status), c=sum(status!=1)) -> df1
+  N=length(df0$status)
+  df1 %>% mutate(r=c(N, N-cumsum(d+c)[-length(N-cumsum(d+c))] )) -> df1
+  Skm= c(1,cumprod(1-df1$d/df1$r))
+  
+  if(choise.plot ==TRUE){
+    plot(stepfun(df1$dates, Skm), col='purple', main="Estimateur de la Survie par Kaplan Meier de (dates, status)", xlab="dates",ylab="Survie")
+    
+  }
+
+  return(list(xx=df1$dates, yy=Skm))
+}
+#help("stepfun")
+```
+
+2. Essayez votre fonction en simulant par exemple des données binomiales (en rajoutant 1 pour ne
+pas avoir d’observations à la date zéro) et des censures de même loi binomiale, indépendantes, et
+en créant un jeu de données censurées sur le même principe qu’aux TP 1 et 2. Vérifiez qu’avec un
+grand nombre d’observations, la survie estimée est proche de la vraie survie (utiliser pbinom pou
+comparer)
+
+
+```{r}
+# Test de ma fonction avec des données binomiales indépendantes:
+size.vect=2000# a choisir arbitrairement
+nb_trial=500
+ttilde = rbinom(size.vect, nb_trial, 0.5)
+c = rbinom(size.vect, nb_trial, 0.5)
+dates=pmin(ttilde, c)# 5 est choisis arbitrairement
+status= (ttilde<= c)*1
+n=length(EstimSurvie_km(dates, status, choise.plot= FALSE)$xx) 
+#length(df2$dates)
+
+t_i_abscisses=seq(0, max(dates), length.out=n)
+S_th=pbinom(q=t_i_abscisses, nb_trial, prob=0.5, lower.tail=F)
+
+EstimSurvie_km(dates, status, choise.plot= TRUE)
+lines(t_i_abscisses, S_th, col="blue")
+legend("topright", legend=c("Skm", "Survie théorique"), col=c("purple", "blue"), lty=c(1,1))
+
+```
+
+Les temps de survie dans cet ensemble de données sont donc le temps réel jusqu'à la cécité en mois, moins le temps minimum possible jusqu'à l'événement (6,5 mois). La censure a été causée par le décès, l'abandon ou la fin de l'étude.
+```{r setup, include=FALSE}
+library(survival)
+library(survminer)
+library(tidyverse)
+```
+
+```{r}
+??survival::diabetic
+(diab=survival::diabetic)# 8 var. de: 
+#length(unique(diab$id))#197 patients /treatment: 0 = no treatment, 1= laser
+```
+
+3.1. Vérifiez que votre estimateur est le même que celui du package surival :  graphiquement
+
+```{r}
+#Dans un 1er temps, nous créons par la fonction Surv, un objet de type survie qui nous permettra d’utiliser les fonctions du package survival et en particulier la fonction survfit afin de représenter une estimation de la survie par Kaplan Meier:
+base=Surv(diab$time, diab$status)
+Skm <- summary(survfit(base~1, data =diab))$surv # par défaut la fonction survfit construit l'estimateur de Kaplan Meier de la survie
+
+time.skm.survival=summary(survfit(base~1, data =diab))$time
+EstimSurvie_km(diab$time, diab$status, choise.plot = TRUE)
+lines(time.skm.survival, Skm, col='red')
+legend("topright", legend=c("Skm de ma fonction", "Skm d'1 objet survie "), col=c("purple", "red"), lty=c(1,1))
+```
+
+3.2. Vérifiez que votre estimateur est le même que celui du package surival : 
+ en calculant la différence de deux vecteurs en sortie (attention aux dimensions) On pourra tracer par exemple l’histogramme
+
+```{r}
+diff.skm=unique(EstimSurvie_km(diab$time, diab$status, choise.plot = FALSE)$yy[-1])-Skm
+hist(abs(diff.skm), main = "Histogramme des différences Skm fonction vs Skm survie")
+```
+
+On observe que les valeurs des différences entre les estimateurs de type kaplan-Meier sont comprise entre 0 et $3.5\times10^{-16}$ ce qui est plutôt faible. De plus on observe que la plus grande différence, de classe $[3*10^{-16};3.5\times10^{-16}]$ est celle de plus faible fréquence et que la plus grande fréquence ($60\%$ des différences) est de classe $[1\times10^{-16};1.5\times10{-16}]$ ce qui est un intervalle assez proche de 0. Donc on peut raisonnablement dire que l'estimateur de type Kaplan-Meier calculé par notre fonction s'ajuste bien aux valeurs de ce même type d'estimateur calculé par la fonction survfit par défaut.
+
+
+Exercice 2: Analyse des données diabetic : quantiles, analyse par groupe
+
+1. Quelles sont les variables catégorielles du jeu de données ?
+Les variables cathégorielles sont 
+-"laser" indiquant le type de gaz utilisé par le laser, 
+-"treatment" indiquant le niveau de traitement: 1 si l'oeil du patient a était traité, 0 sinon et 
+-"eye" indiquant l'oeil traité (gauche ou droite).
+-"Risk" indiquant le stade de la rétinopathie diabétique (de 6 à 12).
+
+Chacune des 4 variables ont ainsi des modalités ce qui implique l'étude comparative de la Survie selon la modalité de la vairiables.
+
+2. On regarde l’influence de chaque covariable séparément. En utilisant une formule de
+type survfit(survdata~covariate) et en superposant les courbes de survie estimées
+(plot(fitted, col=c(``black'', ``red''), conf.int=TRUE ) ), discuter quelles variables
+semblent avoir une influence ou non.
+
+```{r}
+??survival::survfit
+base #les données censurées sont marquées par un +
+
+#A présent estimons les courbes de survie de chacuns des groupes par l'estimateur de Kaplan-Meir:
+
+Skm.grouped.by.eye=survfit(base~diab$eye, data =diab)
+Skm.grouped.by.gaz=survfit(base~diab$laser, data =diab)
+Skm.grouped.by.treatment=survfit(base~diab$trt, data =diab)
+Skm.grouped.by.risque=survfit(base~diab$risk, data =diab)
+
+#Dans un 1er temps, on trace l'estimation des survies par modalités (2) des 3 variables cathégorielles séparemment puis on supperpose les courbes: 
+fits=list(EYE=Skm.grouped.by.eye, LASER=Skm.grouped.by.gaz, TREATMENT=Skm.grouped.by.treatment, STADE = Skm.grouped.by.risque )
+ggsurvplot(fits, data = diab, combine = FALSE, # Not Combine curves
+           risk.table =FALSE,                  # Add risk table
+           conf.int = TRUE,                    # Add confidence interval
+           conf.int.style = "step",            # CI style, use "step" or "ribbon"
+           censor = FALSE,                     # Remove censor points  # Clean risk table
+           palette = "jco")
+```
+
+DISCUSSION
+
+Au sujet de la variable "eye", à partir de 2 mois (environ) depuis le début de l'étude, nous observons que la probabilité de ne pas déclencher de cessité est plus forte pour l'oeil gauche que pour l'oeil droit, tout patient confondus. Néanmoins les intervalles de confiance de la survie de chaque oeil se recoupent ce qui implique que ces courbes de survies ne sont pas significativement différentes et que nous ne pouvons conclure quant à leur égalité.
+
+Concernant la variable "laser", nous observons que les courbes de survie de chaque type de laser sont quasiment superposées et que leurs intervalles de confiance respectifs s'interceptent, il semble donc raisonnable d'affirmer que la survie ne diffère pas significativement selon le type de laser au xénon ou à l'argon.
+
+Au sujet de la variable "treatment", nous observons qu'à partir de 20 mois depuis le début de l'étude, la probabilité de ne pas déclencher de cessité chez les patients traités (peu importe le type de laser) est supérieur à celle des non traités et que leur intervalles de confiance respectifs sont disjoints. Ainsi il semble raisonnable d'affirmer que ces courbes de survie sont significativement différentes.
+
+-"risk" puisque les intervales de confiance de  chaque modalité se recoupent, nous ne povons pas conclure quant à la difference ou l'égalité significative des courbes de suivie. 
+
+
+
+Au final on peut conclure que parmi ces 4 variables cathégorielles, la seule qui semble avoir une influence sur le fait de ne pas déclencher de cessité est la variable "treatment".
+
+Pour vérifier ces déductions, il serait judicieux de procéder au test du log-Rank qui compare de mannière significative les temps de survie entre les modalités de chaque variable avec comme hypothèses:
+$H_{0}$: pas de différence entre les deux courbes de la variable
+$H_{1}$: la courbe d'une des modalité est différente de l'autre pour une même variable.
+
+```{r}
+survdiff(base~ diab$eye)
+survdiff(base~ diab$laser)
+survdiff(base~ diab$trt)
+```
+
+Les résultats du test montre que pour la variable 
+
+-"eye", la p.value= 0.08 est légèrement supérieur à 0.05 donc on ne peut pas vraiment conclure
+-"laser" la p.value= 0.9 est  supérieur à 0.05 donc on a pas de raison de rejeter $H_{0}$ ainsi il semble que la courbe de survie du laser au xénon soit significativement non différente de celle du laser à l'argon
+-"treatment " la p.value= 2e-06 est largement inférieur à 0.05 donc on rejette $H_{0}$, ainsi il semble que la courbe de survie chez les patients traités diffère significativement de celle chez les non traités.
+Finalement les résultats du test confirmes apportent une pécision quant à nos 1ères déductions issus des graphes.
+
+
+3. Donner une estimation de la probabilité de ’survie’ au delà de 22 mois tous groupes confondus.
+Donner un intervalle de confiance et préciser le niveau de confiance de l’intervalle.
+
+```{r}
+Skm.all.groups=survfit(base~1, data =diab)
+summary(Skm.all.groups, times = 22)
+```
+
+Au delà de 22 mois (depuis le début de l'étude), pour tout groupe confondus, la probabilité de ne pas observer de cessité est de 0.729 avec un intervalle de confiance I.C=$[0.686; 0.775]$ de niveau $95\%$ qui ne contient pas la valeur 0, donc on rejette l'hypothèse H0 à savoir que cette probabilité est non significative. Ainsi on peut raisonnablement affirmer que cette valeur est significative à un niveau de confiance de $95\%$.
+
+
+4. Même question pour les groupes ayant reçu un traitement et n’ayant pas reçu de traitement. Commenter
+
+```{r}
+Skm.grouped.by.treatment
+summary(Skm.grouped.by.treatment, times = 22)
+```
+
+Au delà de 22 mois, la probabilité de ne pas observer de cessité chez 1 patient 
+-non traités est estimée à  0.65 avec un intervalle de confiance I.C.=$[0.585; 0.721]$ de niveau 95%
+-alors que celle d'un patient traité (quelque soit le type de laser utilisé) est estimée à $0.804$ avec un intervalle de confiance I.C.=$[0.749; 0.863]$ de niveau $95\%$.
+Ainsi  au delà de 22 mois, la probabilité estimée de ne pas déclencher de cessité est plus élevée de $15.4\%$ chez les patients traités que celle chez les nons traités avec un intervalle de confiance plus large que celui de la cohorte mais plus étroit que celui du groupe de patients non traitéS De plus 0 n'appartient pas à ces intervalles ne confiance donc on rejette l'hypothèse H0 à savoir que cette probabilité est non significative. Ainsi on peut raisonnablement affirmer que cette valeur est significative à un niveau de confiance de $95\%$.
+
+Le traitement par laser quelque soit le gaz utilisé semble donc efficace.
+
+5. Donner une estimation du quantile à $25\%$ de la durée de survie, tous groupes confondus. C’est-à-dire, quelle est le temps $t_{25}$ tel que $25\%$ seulement des patients deviennent aveugle avant $t_{25} ?
+Donner un intervalle de confiance pour ce quantile, et préciser le niveau de confiance. On pourra
+utiliser la méthode quantile du package.
+
+```{r}
+#plot(Skm.all.groups, conf.int = TRUE, main ='Estimation par KM de la courbe de survie globale',xlab='time in months', ylab="SKM")
+??quantile()
+# Avec nos données, les quantiles ne sont pas observables graphiquement alors on utilise la fonction quantile()
+(quantile(Skm.all.groups, probs = 0.25, conf.int = TRUE))
+```
+
+Le quantile à $25\%$ de la dureé de survie est le temps auquel on observe l'événement d'intérêt chez $25\%$ des patients et la survie à cet évènement chez $75\%$ des autres patients. Donc dans notre étude, le temps avant lequel $25\%$ des patients (tout groupe confondus) deviennent aveugle est de $t_{25}=19.4$ mois soit environ 19 mois et 12 jours avec un intervalle de confiance I.C.$=[13.97;26.17]$ de niveau $95\%$.
+
+6.  On considère maintenant les données groupées par valeur de la variable trt. Peut-on dire que la valeur du quantile à $25\%$ pour la survie est significativement différent dans les deux groupes ?
+
+```{r}
+(quantile(Skm.grouped.by.treatment, probs = 0.25, conf.int = TRUE))
+```
+
+Le temps avant lequel $25\%$ des patients non traités deviennent aveugle est de $t_{25}=13.83$ mois soit environ 13 mois et 25 jours avec un intervale de confiance I.C.=$[9.90;19.4]$ de niveau $95\%$ alors que chez les patients traités, il est de $t_{25=34.57$ mois soit environ 34 mois et 17 jours. Ainsi le temps avant que 25% des patients deviennent aveugle est plus deux fois plus élevé chez ceux ayant bénéficier du traitement que chez les nons traités. De plus l'I.C. de $t_{25}$ chez les nons traités est plus serré que celui de la cohorte globale, la valeur t25 pour ce groupe est donc plus fiable. De plus la borne supérieur de l'intervalle de confiance chez les patient nons traités est inferieur à la borne inférieur de cet intervalle chez les patients traités $(19.4<24.43)$. Ainsi ces intervalles sont disjoints donc nous pouvons raisonnablement dire que la valeur du quantile de la durée de survie est significativement différente selon que les patients sont traités ou non.
+
+7.a. Toujours avec le package survival on cherche à comparer l’estimateur de l’estimateur de Kaplan-meyer et l’estimateur de Harrigton - Fleming de la survie. On rappelle que ce dernier est basé sur
+l’estimateur de Nelson Aalen du risque cumulé
+
+```{r}
+HF.all.groups=survfit(base~1, type = "fleming-harrington",data =diab)
+plot(HF.all.groups,fun="surv", col='blue',
+           main="Comparaison de l’estimateur de KM à celui d'Harrington-Fleming")
+lines(Skm.all.groups,fun="surv", col='red')
+legend("topright", legend=c("Skm", "Shf"), col=c("red", "blue"), lty=c(1,1))
+
+```
+
+7.b. Comparer l’estimateur de Kaplan-Meyer et l’estimateur de Harrington-Fleming pour les données diabetic. On pourra tracer par exemple l’histogramme
+
+```{r}
+diff_surv=summary(HF.all.groups)$surv-summary(Skm.all.groups)$surv
+hist(abs(diff_surv), main = "Histogramme des différences entre les estimateurs KM et HF")
+```
+
+Discussion:
+
+On observe que les valeurs des différences entre l'estimateur de type kaplan-Meier et Harrygton Fleming sont comprise entre 0 et $1.2\times10^{-3)}$ ce qui est plutôt faible. De plus on observe que la plus grande différence d'ordre $1.2\times10^{-3}$ est celle de plus faible fréquence (inférieur à 5% des différences) et que la plus grande fréquence (environ 30% des différences) est de classe $[1\times10^(-4); 2\times10^{-4}]$ ce qui est un intervalle assez proche de 0. Donc on peut raisonnablement dire que l'estimateur de type Kaplan-Meier calculé par par la fonction survfit s'ajuste bien aux valeurs de l'estimateur de Harrygton Fleming calculé par cette même fonction. Néanmoins ces différences restent plus grandes que celles entre 2 estimateurs de Kaplan-Meier calculés par 2 fonctions différentes à l'exercice 1.
